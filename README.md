@@ -13,4 +13,3 @@ A Tkinter GUI app to optimize Excel/CSV descriptions for SEO using Open AI's API
 - **Python**: 3.8+ (macOS).
 - **Dependencies**: `pandas==2.2.3`, `openpyxl==3.1.5`, `openai==1.51.0`, `tkinter` (included with Python).
 - **Open AI API Key**: Obtain from [Open AI](https://platform.openai.com).
-- **macOS**: For running the provided `SEOOptimizer.app` executable.
