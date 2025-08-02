@@ -23,30 +23,19 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import tempfile
 import shutil
+import threading
 
-# Initialize Open AI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", "key!"))  # Use environment variable in production
+# Initialize OpenAI client with API key
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", "sk-proj-..."))
 
-
-def make_seo_friendly(description: str, seo_prompt: str) -> str:
-    """
-    Optimize a description for SEO using Open AI's API.
-
-    Args:
-        description (str): The original description to optimize.
-        seo_prompt (str): The SEO prompt to guide optimization.
-
-    Returns:
-        str: The optimized description, capitalized. Returns original description
-             if API call fails or input is invalid.
-    """
+# Generate an SEO-friendly version of a given description using OpenAI
+def make_seo_friendly(description, seo_prompt):
     if not isinstance(description, str) or description.strip() == '':
         return "No description provided."
 
     prompt = f"{seo_prompt}: '{description}'"
 
     try:
-        # Call Open AI API to generate optimized description
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -56,148 +45,151 @@ def make_seo_friendly(description: str, seo_prompt: str) -> str:
             max_tokens=500,
             temperature=0.7
         )
-        optimized_description = response.choices[0].message.content.strip()
-        return optimized_description.capitalize()
-
+        return response.choices[0].message.content.strip().capitalize()
     except Exception as e:
         print(f"Error with Open AI API: {e}")
         return description.capitalize()
 
+# Render a DataFrame in a Treeview widget
+def display_dataframe(tree, df):
+    tree.delete(*tree.get_children())
+    if df is None:
+        return
 
-def process_excel_file(input_path: str, output_path: str) -> tuple[bool, str]:
-    """
-    Process an Excel or CSV file to optimize descriptions for SEO.
+    columns = list(df.columns)
+    tree["columns"] = columns
+    tree["show"] = "headings"
 
-    Args:
-        input_path (str): Path to the input .xlsx or .csv file.
-        output_path (str): Path to save the optimized .xlsx file.
+    # Auto-adjust column widths
+    for col in columns:
+        max_width = max([len(str(df[col].iloc[i])) * 8 for i in range(min(len(df), 100))] + [len(col) * 8])
+        tree.column(col, width=max(max_width, 100), anchor="w", stretch=False)
+        tree.heading(col, text=col)
 
-    Returns:
-        tuple[bool, str]: A tuple containing a success flag and a status message.
-    """
-    try:
-        # Read input file based on extension
-        if input_path.endswith('.csv'):
-            df = pd.read_csv(input_path)
-        else:
-            try:
-                df = pd.read_excel(input_path, engine='openpyxl')
-            except BadZipFile:
-                raise ValueError("The file is not a valid .xlsx file.")
+    for _, row in df.iterrows():
+        tree.insert("", "end", values=[str(row[col]) for col in columns])
 
-        # Validate required columns
-        required_columns = ['Name', 'Id', 'Description']
-        if not all(col in df.columns for col in required_columns):
-            raise ValueError("Excel file must contain 'Name', 'Id', and 'Description' columns.")
-
-        # Validate SEO prompt in first row
-        if len(df) < 1 or not isinstance(df.loc[0, 'Name'], str) or df.loc[0, 'Name'].strip() == '':
-            raise ValueError("The first cell in the 'Name' column must contain a valid SEO prompt.")
-        seo_prompt = df.loc[0, 'Name'].strip()
-
-        # Optimize descriptions for rows after the first
-        df.loc[1:, 'Description'] = df.loc[1:, 'Description'].apply(lambda desc: make_seo_friendly(desc, seo_prompt))
-
-        # Save optimized data to Excel
-        df.to_excel(output_path, index=False, engine='openpyxl')
-        return True, "SEO-friendly Excel file saved."
-
-    except ValueError as e:
-        return False, f"Error: {e}"
-    except Exception as e:
-        return False, f"An unexpected error occurred: {e}"
-
-
+# Main application class
 class SEOOptimizerApp:
-    """A Tkinter-based GUI application for SEO description optimization."""
-
-    def __init__(self, root: tk.Tk):
-        """
-        Initialize the GUI application.
-
-        Args:
-            root (tk.Tk): The root Tkinter window.
-        """
+    def __init__(self, root):
         self.root = root
         self.root.title("SEO Description Optimizer")
-        self.root.geometry("600x400")
-        self.root.configure(bg="#1E1E2F")  # Dark blue-gray background
+        self.root.geometry("1200x600")
+        self.root.configure(bg="#1E1E2F")
 
-        # Initialize GUI components
-        self._setup_gui()
-
-        self.input_path = None
-        self.output_path = None
-
-    def _setup_gui(self):
-        """Configure GUI elements for the application."""
-        # Welcome message
+        # UI setup
         self.welcome_label = tk.Label(
-            self.root,
-            text="Welcome to SEO Description Optimizer!",
+            root,
+            text="Description Optimizer for SEO",
             font=("Helvetica", 18, "bold"),
-            fg="#FFD700",  # Gold text
+            fg="#FFD700",
             bg="#1E1E2F",
-            wraplength=500
+            wraplength=1100
         )
-        self.welcome_label.pack(pady=20)
+        self.welcome_label.pack(pady=10)
 
-        # Instructions
-        self.instructions = tk.Label(
-            self.root,
-            text="Upload a .xlsx or .csv file to optimize descriptions for SEO.",
-            font=("Helvetica", 11),
-            fg="#E0E0E0",  # Light gray
-            bg="#1E1E2F"
-        )
-        self.instructions.pack(pady=10)
+        self.button_frame = tk.Frame(root, bg="#1E1E2F", bd=2, relief="sunken")
+        self.button_frame.pack(fill="x", padx=10, pady=5)
 
-        # File upload button
+        self.prompt_entry = tk.Entry(self.button_frame, font=("Helvetica", 12), width=60)
+        self.prompt_entry.insert(0, "Enter custom SEO prompt here...")
+        self.prompt_entry.pack(side="left", padx=5, pady=5)
+
         self.upload_button = tk.Button(
-            self.root,
+            self.button_frame,
             text="Upload File",
             command=self.upload_file,
-            bg="#00A896",  # Teal
-            fg="white",
+            bg="white",
+            fg="black",
             font=("Helvetica", 12, "bold"),
-            width=20,
-            activebackground="#02C39A",  # Lighter teal on hover
-            activeforeground="white",
-            relief="flat",
-            cursor="hand2"
+            width=15,
+            activebackground="grey",
+            activeforeground="black",
+            relief="raised",
+            cursor="hand2",
+            bd=2
         )
-        self.upload_button.pack(pady=10)
+        self.upload_button.pack(side="left", padx=5, pady=5)
 
-        # Status label
+        self.download_button = tk.Button(
+            self.button_frame,
+            text="Download Optimized File",
+            command=self.download_file,
+            bg="white",
+            fg="black",
+            font=("Helvetica", 12, "bold"),
+            width=25,
+            activebackground="grey",
+            activeforeground="black",
+            relief="raised",
+            cursor="hand2",
+            bd=2
+        )
+        self.download_button.pack(side="right", padx=5, pady=5)
+
         self.status_label = tk.Label(
-            self.root,
-            text="",
+            root,
+            text="Upload a .xlsx or .csv file to optimize descriptions for SEO.",
             font=("Helvetica", 11),
             fg="#E0E0E0",
             bg="#1E1E2F",
-            wraplength=500
+            wraplength=1100
         )
-        self.status_label.pack(pady=10)
+        self.status_label.pack(pady=5)
 
-        # Download button (initially disabled)
-        self.download_button = tk.Button(
-            self.root,
-            text="Download Optimized File",
-            command=self.download_file,
-            bg="#FF6B6B",  # Coral
-            fg="white",
+        self.paned_window = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
+        self.paned_window.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Left pane - original data
+        self.left_frame = tk.Frame(self.paned_window, bg="#1E1E2F")
+        self.paned_window.add(self.left_frame, weight=1)
+
+        self.left_label = tk.Label(
+            self.left_frame,
+            text="Original Spreadsheet",
             font=("Helvetica", 12, "bold"),
-            width=20,
-            state="disabled",
-            activebackground="#FF8787",  # Lighter coral on hover
-            activeforeground="white",
-            relief="flat",
-            cursor="hand2"
+            fg="#FFD700",
+            bg="#1E1E2F"
         )
-        self.download_button.pack(pady=10)
+        self.left_label.pack(pady=5)
 
+        self.original_tree = ttk.Treeview(self.left_frame)
+        self.original_tree.pack(fill="both", expand=True, padx=5, pady=5)
+        self.original_scroll_y = ttk.Scrollbar(self.left_frame, orient="vertical", command=self.original_tree.yview)
+        self.original_scroll_y.pack(side="right", fill="y")
+        self.original_scroll_x = ttk.Scrollbar(self.left_frame, orient="horizontal", command=self.original_tree.xview)
+        self.original_scroll_x.pack(side="bottom", fill="x")
+        self.original_tree.configure(yscrollcommand=self.original_scroll_y.set, xscrollcommand=self.original_scroll_x.set)
+
+        # Right pane - optimized data
+        self.right_frame = tk.Frame(self.paned_window, bg="#1E1E2F")
+        self.paned_window.add(self.right_frame, weight=1)
+
+        self.right_label = tk.Label(
+            self.right_frame,
+            text="Optimized Spreadsheet",
+            font=("Helvetica", 12, "bold"),
+            fg="#FFD700",
+            bg="#1E1E2F"
+        )
+        self.right_label.pack(pady=5)
+
+        self.optimized_tree = ttk.Treeview(self.right_frame)
+        self.optimized_tree.pack(fill="both", expand=True, padx=5, pady=5)
+        self.optimized_scroll_y = ttk.Scrollbar(self.right_frame, orient="vertical", command=self.optimized_tree.yview)
+        self.optimized_scroll_y.pack(side="right", fill="y")
+        self.optimized_scroll_x = ttk.Scrollbar(self.right_frame, orient="horizontal", command=self.optimized_tree.xview)
+        self.optimized_scroll_x.pack(side="bottom", fill="x")
+        self.optimized_tree.configure(yscrollcommand=self.optimized_scroll_y.set, xscrollcommand=self.optimized_scroll_x.set)
+
+        # Internal state variables
+        self.input_path = None
+        self.output_path = None
+        self.optimized_df = None
+        self.original_df = None
+
+    # Load and display file
     def upload_file(self):
-        """Handle file upload and processing."""
         file_path = filedialog.askopenfilename(
             filetypes=[("Excel/CSV files", "*.xlsx *.csv")]
         )
@@ -209,22 +201,56 @@ class SEOOptimizerApp:
         self.download_button.config(state="disabled")
         self.root.update()
 
-        # Create temporary output file
-        self.output_path = os.path.join(tempfile.gettempdir(), "seo_optimized_data.xlsx")
+        display_dataframe(self.original_tree, None)
+        display_dataframe(self.optimized_tree, None)
 
-        # Process the file and update UI
-        success, message = process_excel_file(self.input_path, self.output_path)
-        if success:
-            self.status_label.config(text="Processing complete!", fg="#00FF00")
+        try:
+            if file_path.endswith('.csv'):
+                try:
+                    original_df = pd.read_csv(file_path, encoding='utf-8')
+                except UnicodeDecodeError:
+                    original_df = pd.read_csv(file_path, encoding='cp1252')
+            else:
+                original_df = pd.read_excel(file_path, engine='openpyxl')
+
+            display_dataframe(self.original_tree, original_df)
+            self.original_df = original_df.copy()
+
+            # Run optimization in a separate thread to keep UI responsive
+            threading.Thread(target=self.optimize_seo_descriptions).start()
+
+        except Exception as e:
+            self.status_label.config(text="Failed to load original file.", fg="#FF4040")
+            messagebox.showerror("Error", f"Error loading file: {e}", parent=self.root)
+
+    # Optimize the descriptions column for SEO
+    def optimize_seo_descriptions(self):
+        try:
+            df = self.original_df.copy()
+
+            if 'Description' not in df.columns or 'Name' not in df.columns:
+                raise ValueError("Missing required columns: 'Name' and 'Description'")
+
+            seo_prompt = self.prompt_entry.get().strip() or df.loc[0, 'Name'].strip()
+            df = df.drop(index=0).reset_index(drop=True)
+
+            for idx in df.index:
+                desc = df.at[idx, 'Description']
+                optimized = make_seo_friendly(desc, seo_prompt)
+                df.at[idx, 'Description'] = optimized
+                display_dataframe(self.optimized_tree, df.iloc[:idx+1])
+
+            self.optimized_df = df
+            self.status_label.config(text="Optimization complete!", fg="#00FF00")
             self.download_button.config(state="normal")
-            messagebox.showinfo("Success", message, parent=self.root)
-        else:
-            self.status_label.config(text="Processing failed.", fg="#FF4040")
-            messagebox.showerror("Error", message, parent=self.root)
 
+        except Exception as e:
+            self.status_label.config(text="Optimization failed.", fg="#FF4040")
+            messagebox.showerror("Error", f"Error optimizing data: {e}", parent=self.root)
+
+    # Save optimized data to a file
     def download_file(self):
-        """Handle downloading of the optimized file."""
-        if not self.output_path or not os.path.exists(self.output_path):
+        if not self.optimized_df is not None:
             messagebox.showerror("Error", "No optimized file available.", parent=self.root)
             return
 
@@ -234,12 +260,11 @@ class SEOOptimizerApp:
             initialfile="seo_optimized_data.xlsx"
         )
         if save_path:
-            shutil.copy(self.output_path, save_path)
+            self.optimized_df.to_excel(save_path, index=False, engine='openpyxl')
             messagebox.showinfo("Success", f"File saved to {save_path}", parent=self.root)
 
-
+# Launch the application
 if __name__ == "__main__":
-    """Entry point for the application."""
     root = tk.Tk()
     app = SEOOptimizerApp(root)
     root.mainloop()
