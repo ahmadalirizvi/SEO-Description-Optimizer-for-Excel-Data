@@ -1,3 +1,8 @@
+![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
+![Playwright](https://img.shields.io/badge/Playwright-Automation-success)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Status](https://img.shields.io/badge/Status-Working-brightgreen)
+
 # SEO-Description-Optimizer-for-Excel-Data
 A Tkinter GUI app to optimize Excel/CSV descriptions for SEO using Open AI's API. Upload a file with "Name," "Id," "Description" columns, define an SEO prompt in the first row, and download an optimized Excel file. Features a vibrant interface with dark theme, gold accents, and teal/coral buttons. Ideal for enhancing content visibility.
 ## Features
